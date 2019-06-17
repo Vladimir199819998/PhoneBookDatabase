@@ -1,83 +1,103 @@
-#include "../include/Server.h"
+#include <Client.h>
+#include "Server.h"
 
 Server::Server() {
-    listening = false;
+    sess = new ServerSession;
+    sess->listening = false;
+    sess->clients.clear();
+    sess->queue = 5;
+    sess->server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (sess->server_socket < 0) {
+        perror("socket");
+        exit(0);
+    }
+    fcntl(sess->server_socket, F_SETFL, O_NONBLOCK);
+    setsockopt(sess->server_socket, SOL_SOCKET, SO_REUSEADDR, &sess->opt, sizeof(sess->opt));
+    sess->server_addr.sin_family = AF_INET;
+    sess->server_addr.sin_port = htons(6000);
+    sess->server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
 }
 
 void Server::bootstrap() {
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket < 0) {
-        perror("Cannot create a server socket ...");
+    if (bind(sess->server_socket, (struct sockaddr *) &sess->server_addr, sizeof(sess->server_addr)) < 0) {
+        perror("bind");
         exit(1);
     }
-    fcntl(server_socket, F_SETFL, SOCK_NONBLOCK);
-    server_addr.sin_family = AF_INET; server_addr.sin_port = htons(3452);
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(server_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        perror("Failed to bind server socket ...");
-        exit(2);
-    }
-    int result = listen(server_socket, queue);
-    if (result == 0) {
-        listening = true;
-    }
-    fcntl(server_socket, O_NONBLOCK);
-    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    clients.clear();
+    listen(sess->server_socket, sess->queue);
 }
 
 void Server::loop() {
-    while (listening) {
+    while (sess->listening) {
         fd_set readset;
         FD_ZERO(&readset);
-        FD_SET(server_socket, &readset);
+        FD_SET(sess->server_socket, &readset);
 
-        for (set<int>::iterator it = clients.begin(); it != clients.end(); it++ ) {
-            FD_SET(*it, &readset);
+        for (map<CLIENT_SOCK_DESC, PERS_DATA>::iterator it = sess->clients.begin(); it != sess->clients.end(); it++) {
+            FD_SET(it->first, &readset);
         }
         struct timeval timeout;
         timeout.tv_sec = 60;
         timeout.tv_usec = 0;
 
-        int mx = max(server_socket, *max_element(clients.begin(), clients.end()));
+        int mx = max(sess->server_socket, max_element(sess->clients.begin()->first, sess->clients.end()->first));
         int res = select(mx + 1, &readset, NULL, NULL, &timeout);
         if (res <= 0) {
             cout << "Connection timed out ...";
-            listening = false;
+            sess->listening = false;
             exit(EXIT_SUCCESS);
         }
-        if (FD_ISSET(server_socket, &readset)) {
-            int client_socket = accept(server_socket, NULL, NULL);
+        if (FD_ISSET(sess->server_socket, &readset)) {
+            int client_socket = accept(sess->server_socket, NULL, NULL);
             if (client_socket < 0) {
                 perror("accept");
             }
             fcntl(client_socket, F_SETFL, O_NONBLOCK);
-            clients.insert(client_socket);
-        }
-
-        for (set<int>::iterator it = clients.begin(); it != clients.end(); it++) {
-            if (FD_ISSET(*it, &readset)) {
-                int bytes_read = recv(*it, request, sizeof(request), 0);
-                if (bytes_read <= 0) {
-                    close(*it);
-                    clients.erase(*it);
-                    continue;
-                }
-                int option = atoi(request); // whether to add, edit or delete user.
-                switch (option) {
-                    case Client::ADD_USER:
-                        add_user();
-                        break;
-                    case Client::EDIT_USER:
-                        edit_user();
-                        break;
-                    case Client::DELETE_USER:
-                        delete_user();
-                        break;
-                }
+            PERS_DATA data;
+            if (sess->clients.find(client_socket) == sess->clients.end()) {
+                sess->clients[client_socket] = data;
             }
         }
 
+        for (map<CLIENT_SOCK_DESC, PERS_DATA>::iterator it = sess->clients.begin(); it != sess->clients.end(); it++) {
+            if (FD_ISSET(it->first, &readset)) {
+                int bytes_read = recv(it->first, sess->request, sizeof(sess->request), 0);
+                switch (bytes_read) {
+                    case 0:
+                        close(it->first);
+                        sess->clients.erase(it->first);
+                        break;
+                    case 1:
+                        if (!sess->is_data_valid(it->first)) {
+                            char notification[] = "Ok. Before exercising your option, you must send your name, password and set a database schema ...";
+                            send(it->first, notification, sizeof(notification), 0);
+                            break;
+                        } else {
+                            sess->clients[it->first].option = atoi(sess->request);
+                        }
+                        break;
+                    default:
+                        int option = sess->clients[it->first].option;
+                        stringstream ss(sess->request);
+                        ss >> sess->clients[it->first].username >> sess->clients[it->first].password >> sess->clients[it->first].schema;
+                        switch (option) {
+                            case ADD_USER:
+                                add_user();
+                                break;
+                            case EDIT_USER:
+                                edit_user();
+                                break;
+                            case DELETE_USER:
+                                delete_user();
+                                break;
+                        }
+
+                }
+
+
+            }
+
+        }
     }
 }
 

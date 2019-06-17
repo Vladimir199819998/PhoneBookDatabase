@@ -1,38 +1,38 @@
 #ifndef SERVER_SERVER_H
 #define SERVER_SERVER_H
-#include <iostream>
-#include <string>
-#include <set>
+#include <vector>
+#include <sstream>
 #include <algorithm>
-#include <exception>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <netinet/in.h>
-#include <cstdlib>
 #include <driver.h>
 #include <statement.h>
 #include <mysql_connection.h>
-#include <fcntl.h>
 #include "Client.h"
 using namespace std;
-
-
 #define PASSWORD "root"
 #define USERNAME "root"
+
+typedef struct ServerSession
+{
+    int server_socket;
+    struct sockaddr_in server_addr;
+    map<CLIENT_SOCK_DESC, PERS_DATA> clients;
+    int queue;
+    char request[256];
+    int opt = 1;
+    bool listening = false;
+    bool is_data_valid(CLIENT_SOCK_DESC desc) {
+        if (clients[desc].is_missing()) {
+            return false;
+        }
+        return true;
+    }
+} ServerSession;
+
 
 class Server
 {
 private:
-    int server_socket;
-    int client_socket;
-    int queue = 10;
-    char confirmation[64] = "Connection established! You are now able to send a request!";
-    char request[3];
-    bool listening;
-    int opt = 1;
-    set<int> clients;
-    struct sockaddr_in server_addr;
+    ServerSession *sess;
 public:
     void bootstrap();
     void loop();
@@ -41,6 +41,7 @@ public:
     void delete_user();
     Server();
     ~Server() {
+        delete sess;
         delete this;
     };
 };

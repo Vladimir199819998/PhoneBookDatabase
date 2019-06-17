@@ -93,9 +93,6 @@
 		<Unit filename="/home/vladimir/Documents/CLionProjects/Database/Client/src/Client.cpp">
 			<Option target="Server"/>
 		</Unit>
-		<Unit filename="/home/vladimir/Documents/CLionProjects/Database/Server/include/Server.h">
-			<Option target="Server"/>
-		</Unit>
 		<Unit filename="/home/vladimir/Documents/CLionProjects/Database/Server/main.cpp">
 			<Option target="Server"/>
 		</Unit>
